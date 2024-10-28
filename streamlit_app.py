@@ -24,14 +24,7 @@ st.set_page_config(page_title="Document Genie", layout="wide")
 st.markdown("""
 ## Next-Gen-PDF-Exploration: Get instant insights from your Documents
 
-This chatbot is built using the Retrieval-Augmented Generation (RAG) framework, leveraging Google's Generative AI model Gemini-PRO. It processes uploaded PDF documents by breaking them down into manageable chunks, creates a searchable vector store, and generates accurate answers to user queries. This advanced approach ensures high-quality, contextually relevant responses for an efficient and effective user experience.
 
-### How It Works
-
-1. Enter Your API Key: You'll need a Google API key for access to Google's Generative AI models.  
-2. Upload Your Documents: The system accepts multiple PDF files and creates a searchable vector index.  
-3. Ask a Question: Ask any question related to the uploaded documents.  
-4. Cluster Questions: Use KMeans, Agglomerative, or Hierarchical clustering to group similar questions.
 """)
 
 # API key input
@@ -112,7 +105,7 @@ def cluster_questions(questions, method, n_clusters):
     return clustered_questions
 
 def main():
-    st.header("AI Clone Chatbot 💁")
+    st.header("CAT 3 IR - PDF QUESTION ANSWERING SYSTEM")
 
     user_question = st.text_input("Ask a Question from the PDF Files", key="user_question")
 
