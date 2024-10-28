@@ -2,7 +2,6 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-import google.generativeai as genai
 from langchain.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
@@ -65,17 +64,19 @@ def compute_bm25_scores(text_chunks):
     bm25 = BM25Okapi(tokenized_chunks)
     return bm25
 
-# TF-IDF + Cosine Similarity retrieval method
-def compute_tfidf_similarity(text_chunks):
-    vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform(text_chunks)
-    return tfidf_matrix
-
 # Vector store retrieval method
 def get_vector_store(text_chunks, api_key):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("faiss_index")
+
+# Tfidf retrieval method
+def tfidf_retrieval(query, text_chunks):
+    vectorizer = TfidfVectorizer()
+    X = vectorizer.fit_transform(text_chunks)
+    query_vector = vectorizer.transform([query])
+    similarities = cosine_similarity(query_vector, X).flatten()
+    return similarities
 
 # KMeans clustering method
 def kmeans_clustering(text_chunks, n_clusters=5):
@@ -102,8 +103,8 @@ def dbscan_clustering(text_chunks):
             clusters[label].append(text_chunks[i])
     return clusters
 
-# Hierarchical clustering method
-def hierarchical_clustering(text_chunks, n_clusters=5):
+# Agglomerative Clustering method
+def agglomerative_clustering(text_chunks, n_clusters=5):
     vectorizer = TfidfVectorizer(max_features=500)
     X = vectorizer.fit_transform(text_chunks)
     agglomerative = AgglomerativeClustering(n_clusters=n_clusters)
@@ -128,32 +129,41 @@ def get_conversational_chain(api_key):
     return chain
 
 # Function to process user input and generate response
-def user_input(user_question, api_key, retrieval_method, bm25, tfidf_matrix, clusters):
+def user_input(user_question, api_key, bm25, text_chunks, clusters, retrieval_method):
     expanded_query = expand_query(user_question)
-    
-    # Perform retrieval based on the chosen method
-    if retrieval_method == "BM25":
+
+    # Check the retrieval method and perform the appropriate action
+    if retrieval_method == "BM25" and bm25:
         tokenized_query = expanded_query.split(" ")
         bm25_scores = bm25.get_scores(tokenized_query)
-        top_chunks = [text_chunks[i] for i in bm25_scores.argsort()[::-1]]
-    elif retrieval_method == "TF-IDF + Cosine Similarity":
-        cosine_similarities = cosine_similarity(tfidf_matrix, tfidf_matrix)
-        top_chunks = cosine_similarities.argsort(axis=1)[-5:]  # Get top 5 similar documents
-    else:  # Vector Store
+
+        # Select relevant documents based on BM25 scores
+        relevant_docs = [text_chunks[i] for i in range(len(bm25_scores)) if bm25_scores[i] > 0]
+        top_chunks = sorted(relevant_docs, key=lambda x: bm25_scores[text_chunks.index(x)], reverse=True)[:5]
+
+        chain = get_conversational_chain(api_key)
+        response = chain({"input_documents": top_chunks, "question": user_question}, return_only_outputs=True)
+        st.write("Reply: ", response["output_text"])
+
+    elif retrieval_method == "Vector Store":
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
         new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
         docs = new_db.similarity_search(expanded_query)
-        top_chunks = [doc['text'] for doc in docs]
 
-    # Find the most relevant cluster
-    relevant_cluster = max(clusters.keys(), key=lambda k: cosine_similarity(
-        TfidfVectorizer().fit_transform([" ".join(clusters[k]) + " " + expanded_query])))
+        chain = get_conversational_chain(api_key)
+        response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
+        st.write("Reply: ", response["output_text"])
 
-    # Combine top chunks from retrieval method and relevant cluster
-    combined_chunks = [chunk for chunk in top_chunks if chunk in clusters[relevant_cluster]]
-    chain = get_conversational_chain(api_key)
-    response = chain({"input_documents": combined_chunks[:5], "question": user_question}, return_only_outputs=True)
-    st.write("Reply: ", response["output_text"])
+    elif retrieval_method == "Tfidf":
+        similarities = tfidf_retrieval(expanded_query, text_chunks)
+        top_indices = similarities.argsort()[-5:][::-1]  # Get the indices of the top 5 documents
+        top_chunks = [text_chunks[i] for i in top_indices]
+
+        chain = get_conversational_chain(api_key)
+        response = chain({"input_documents": top_chunks, "question": user_question}, return_only_outputs=True)
+        st.write("Reply: ", response["output_text"])
+    else:
+        st.warning("BM25 not initialized or retrieval method not set.")
 
 # Main Streamlit function
 def main():
@@ -164,14 +174,18 @@ def main():
         return
 
     # Dropdown to select retrieval and clustering algorithms
-    retrieval_method = st.sidebar.selectbox("Select Retrieval Algorithm:", ("BM25", "TF-IDF + Cosine Similarity", "Vector Store"))
-    clustering_method = st.sidebar.selectbox("Select Clustering Algorithm:", ("KMeans", "DBSCAN", "Hierarchical"))
+    retrieval_method = st.sidebar.selectbox("Select Retrieval Algorithm:", ("BM25", "Vector Store", "Tfidf"))
+    clustering_method = st.sidebar.selectbox("Select Clustering Algorithm:", ("KMeans", "DBSCAN", "Agglomerative Clustering"))
 
     user_question = st.text_input("Ask a Question from the PDF Files", key="user_question")
 
+    # Initialize variables
+    bm25 = None
+    text_chunks = []
+
     if user_question:
         try:
-            user_input(user_question, api_key, retrieval_method, bm25, tfidf_matrix, clusters)
+            user_input(user_question, api_key, bm25, text_chunks, {}, retrieval_method)
         except Exception as e:
             st.error(f"An error occurred while processing your question: {e}")
 
@@ -185,28 +199,23 @@ def main():
                     with st.spinner("Processing..."):
                         raw_text = get_pdf_text(pdf_docs)
                         text_chunks = get_text_chunks(raw_text)
-
+                        
                         # Perform clustering based on the chosen algorithm
                         if clustering_method == "KMeans":
                             clusters = kmeans_clustering(text_chunks)
                         elif clustering_method == "DBSCAN":
                             clusters = dbscan_clustering(text_chunks)
-                        elif clustering_method == "Hierarchical":
-                            clusters = hierarchical_clustering(text_chunks)
-                        st.write(f"{clustering_method} clustering has been applied to the document content.")
+                        elif clustering_method == "Agglomerative Clustering":
+                            clusters = agglomerative_clustering(text_chunks)
 
-                        # Perform retrieval based on the chosen method
-                        if retrieval_method == "BM25":
-                            bm25 = compute_bm25_scores(text_chunks)
-                        elif retrieval_method == "TF-IDF + Cosine Similarity":
-                            tfidf_matrix = compute_tfidf_similarity(text_chunks)
-                        else:
-                            get_vector_store(text_chunks, api_key)
+                        # Initialize BM25
+                        bm25 = compute_bm25_scores(text_chunks)
 
+                        st.success("Documents processed successfully!")
                 except Exception as e:
-                    st.error(f"An error occurred while processing the documents: {e}")
+                    st.error(f"An error occurred while processing your PDFs: {e}")
             else:
-                st.warning("Please upload a PDF file to proceed.")
+                st.warning("Please upload PDF files before processing.")
 
 if __name__ == "__main__":
     main()
