@@ -10,4 +10,5 @@ rank-bm25
 nltk
 scikit-learn
 sentence-transformers
-
+matplotlib
+torch
