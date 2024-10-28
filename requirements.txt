@@ -8,3 +8,4 @@ langchain_google_genai
 langchain_community
 rank-bm25
 nltk
+scikit-learn
