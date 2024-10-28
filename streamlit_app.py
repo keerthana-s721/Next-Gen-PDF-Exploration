@@ -23,8 +23,6 @@ st.set_page_config(page_title="Document Genie", layout="wide")
 
 st.markdown("""
 ##PDF-Exploration: Get instant insights from your Documents
-
-
 """)
 
 # API key input
