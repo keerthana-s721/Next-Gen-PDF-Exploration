@@ -23,8 +23,6 @@ st.set_page_config(page_title="Document Genie", layout="wide")
 
 st.markdown("""
 ## Next-Gen-PDF-Exploration: Get instant insights from your Documents
-
-
 """)
 
 # API key input
@@ -61,16 +59,16 @@ def get_conversational_chain(api_key):
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
     return chain
 
-def user_input(user_question, api_key):
+def answer_question_from_cluster(question, api_key):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
-    docs = new_db.similarity_search(user_question)
+    docs = new_db.similarity_search(question)
     chain = get_conversational_chain(api_key)
-    response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
-    st.write("Reply: ", response["output_text"])
+    response = chain({"input_documents": docs, "question": question}, return_only_outputs=True)
+    return response["output_text"]
 
-def cluster_questions(questions, method, n_clusters):
-    model = SentenceTransformer('all-MiniLM-L6-v2')  # Load the Sentence Transformer model
+def cluster_questions(questions, method, n_clusters, api_key):
+    model = SentenceTransformer('all-MiniLM-L6-v2')
     embeddings = model.encode(questions)
 
     if method == "KMeans":
@@ -78,11 +76,9 @@ def cluster_questions(questions, method, n_clusters):
         labels = cluster_model.fit_predict(embeddings)
         inertia = cluster_model.inertia_
         st.write(f"Inertia: {inertia}")
-    
     elif method == "Agglomerative":
         cluster_model = AgglomerativeClustering(n_clusters=n_clusters)
         labels = cluster_model.fit_predict(embeddings)
-    
     elif method == "Hierarchical":
         Z = linkage(embeddings, 'ward')
         plt.figure(figsize=(10, 5))
@@ -90,19 +86,25 @@ def cluster_questions(questions, method, n_clusters):
         st.pyplot(plt)
         return {}  # No further clustering needed for dendrogram
 
-    # Calculate metrics
     silhouette = silhouette_score(embeddings, labels)
     davies_bouldin = davies_bouldin_score(embeddings, labels)
 
     st.write(f"Silhouette Score: {silhouette}")
     st.write(f"Davies-Bouldin Index: {davies_bouldin}")
 
-    # Group questions by cluster
     clustered_questions = {i: [] for i in range(n_clusters)}
     for idx, label in enumerate(labels):
         clustered_questions[label].append(questions[idx])
 
-    return clustered_questions
+    # Generate answers for each question in each cluster
+    clustered_answers = {}
+    for cluster_id, qs in clustered_questions.items():
+        clustered_answers[cluster_id] = []
+        for question in qs:
+            answer = answer_question_from_cluster(question, api_key)
+            clustered_answers[cluster_id].append((question, answer))
+
+    return clustered_answers
 
 def main():
     st.header("CAT 3 IR - PDF QUESTION ANSWERING SYSTEM")
@@ -143,13 +145,14 @@ def main():
             if len(questions) < 2:
                 st.warning("Please enter at least two questions to cluster.")
             else:
-                clusters = cluster_questions(questions, clustering_method, n_clusters)
-                if clusters:
-                    st.write("Clustered Questions:")
-                    for cluster, qs in clusters.items():
+                clusters_with_answers = cluster_questions(questions, clustering_method, n_clusters, api_key)
+                if clusters_with_answers:
+                    st.write("Clustered Questions and Answers:")
+                    for cluster, qas in clusters_with_answers.items():
                         st.write(f"Cluster {cluster}:")
-                        for q in qs:
-                            st.write(f"- {q}")
+                        for q, a in qas:
+                            st.write(f"- Question: {q}")
+                            st.write(f"  Answer: {a}")
 
 if __name__ == "__main__":
     main()
