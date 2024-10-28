@@ -11,7 +11,14 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
 from sklearn.metrics.pairwise import cosine_similarity
 from nltk.corpus import wordnet
+import nltk
 import logging
+
+# Download WordNet if not already downloaded
+try:
+    nltk.data.find('corpora/wordnet')
+except LookupError:
+    nltk.download('wordnet')
 
 # Set up logging for debugging
 logging.basicConfig(level=logging.INFO)
@@ -200,7 +207,7 @@ def main():
                         raw_text = get_pdf_text(pdf_docs)
                         text_chunks = get_text_chunks(raw_text)
                         
-                        # Perform clustering based on the chosen algorithm
+                        # Perform clustering based on selected method
                         if clustering_method == "KMeans":
                             clusters = kmeans_clustering(text_chunks)
                         elif clustering_method == "DBSCAN":
@@ -208,7 +215,7 @@ def main():
                         elif clustering_method == "Agglomerative Clustering":
                             clusters = agglomerative_clustering(text_chunks)
 
-                        # Initialize BM25
+                        # Initialize BM25 for retrieval
                         bm25 = compute_bm25_scores(text_chunks)
 
                         st.success("Documents processed successfully!")
