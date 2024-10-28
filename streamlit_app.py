@@ -1,3 +1,11 @@
+import subprocess
+import sys
+
+# Install necessary packages if they are not already installed
+required_packages = ["rank_bm25", "PyPDF2", "langchain", "langchain_google_genai", "google-generativeai", "scikit-learn", "nltk"]
+for package in required_packages:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
 import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -7,13 +15,11 @@ from langchain.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
-import os
 import logging
 from rank_bm25 import BM25Okapi
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.cluster import KMeans
 from nltk.corpus import wordnet
-import numpy as np
+import os
 
 # Set up logging for debugging
 logging.basicConfig(level=logging.INFO)
@@ -22,7 +28,16 @@ st.set_page_config(page_title="Document Genie", layout="wide")
 
 st.markdown("""
 ## Next-Gen-PDF-Exploration: Get instant insights from your Documents
+
 This chatbot is built using the Retrieval-Augmented Generation (RAG) framework, leveraging Google's Generative AI model Gemini-PRO. It processes uploaded PDF documents by breaking them down into manageable chunks, creates a searchable vector store, and generates accurate answers to user queries. This advanced approach ensures high-quality, contextually relevant responses for an efficient and effective user experience.
+
+### How It Works
+
+Follow these simple steps to interact with the chatbot:
+
+1. **Enter Your API Key**: You'll need a Google API key for the chatbot to access Google's Generative AI models. Obtain your API key [here](https://makersuite.google.com/app/apikey).
+2. **Upload Your Documents**: The system accepts multiple PDF files at once, analyzing the content to provide comprehensive insights.
+3. **Ask a Question**: After processing the documents, ask any question related to the content of your uploaded documents for a precise answer.
 """)
 
 # API key input
@@ -64,7 +79,6 @@ def get_vector_store(text_chunks, api_key):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("faiss_index")
-    return vector_store
 
 def get_conversational_chain(api_key):
     prompt_template = """
@@ -80,35 +94,21 @@ def get_conversational_chain(api_key):
     chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
     return chain
 
-def perform_clustering(text_chunks, num_clusters=5):
-    vectorizer = TfidfVectorizer(max_df=0.8, max_features=1000)
-    tfidf_matrix = vectorizer.fit_transform(text_chunks)
-    kmeans = KMeans(n_clusters=num_clusters, random_state=0)
-    kmeans.fit(tfidf_matrix)
-    return kmeans, tfidf_matrix
-
-def get_relevant_clusters(query, kmeans, tfidf_matrix, text_chunks):
-    query_vec = TfidfVectorizer().fit_transform([query]).toarray()
-    cluster_distances = kmeans.transform(query_vec)
-    closest_cluster = cluster_distances.argmin()
-    relevant_chunks = [text_chunks[i] for i in range(len(text_chunks)) if kmeans.labels_[i] == closest_cluster]
-    return relevant_chunks
-
-def user_input(user_question, api_key, bm25, text_chunks, kmeans, tfidf_matrix):
+def user_input(user_question, api_key, bm25, text_chunks):
     expanded_query = expand_query(user_question)
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
     docs = new_db.similarity_search(expanded_query)
 
-    # Get relevant chunks based on clustering
-    relevant_chunks = get_relevant_clusters(expanded_query, kmeans, tfidf_matrix, text_chunks)
-    bm25_scores = bm25.get_scores(expanded_query.split())
+    top_chunks = [doc['text'] for doc in docs]
+    tokenized_query = expanded_query.split(" ")
+    bm25_scores = bm25.get_scores(tokenized_query)
 
-    # Sort by BM25 scores within relevant chunks
-    sorted_chunks = [relevant_chunks[i] for i in np.argsort(bm25_scores)[::-1]]
-
+    # Sort chunks by BM25 scores in descending order
+    top_chunks_sorted = [top_chunks[i] for i in bm25_scores.argsort()[::-1]]
+    
     chain = get_conversational_chain(api_key)
-    response = chain({"input_documents": sorted_chunks[:5], "question": user_question}, return_only_outputs=True)
+    response = chain({"input_documents": top_chunks_sorted[:5], "question": user_question}, return_only_outputs=True)
     st.write("Reply: ", response["output_text"])
 
 def main():
@@ -119,7 +119,7 @@ def main():
     if user_question and api_key:
         try:
             # Process the question with query expansion and BM25 re-ranking
-            user_input(user_question, api_key, bm25, text_chunks, kmeans, tfidf_matrix)
+            user_input(user_question, api_key, bm25, text_chunks)
         except Exception as e:
             st.error(f"An error occurred while processing your question: {e}")
 
@@ -137,11 +137,7 @@ def main():
 
                     bm25 = compute_bm25_scores(text_chunks)
                     get_vector_store(text_chunks, api_key)
-                    
-                    # Perform clustering on the text chunks
-                    kmeans, tfidf_matrix = perform_clustering(text_chunks)
-                    
-                    st.success("Documents processed and clustered successfully!")
+                    st.success("Documents processed successfully!")
             except Exception as e:
                 st.error(f"An error occurred while processing the PDFs: {e}")
 
