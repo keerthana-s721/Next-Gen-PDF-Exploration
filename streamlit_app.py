@@ -7,9 +7,10 @@ from langchain.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
-from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sentence_transformers import SentenceTransformer
 import numpy as np
+import os
 import logging
 
 # Set up logging for debugging
@@ -17,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 
 st.set_page_config(page_title="Document Genie", layout="wide")
 
-st.markdown(""" 
+st.markdown("""
 ## Next-Gen-PDF-Exploration: Get instant insights from your Documents
 
 This chatbot is built using the Retrieval-Augmented Generation (RAG) framework, leveraging Google's Generative AI model Gemini-PRO. It processes uploaded PDF documents by breaking them down into manageable chunks, creates a searchable vector store, and generates accurate answers to user queries. This advanced approach ensures high-quality, contextually relevant responses for an efficient and effective user experience.
@@ -26,9 +27,9 @@ This chatbot is built using the Retrieval-Augmented Generation (RAG) framework, 
 
 Follow these simple steps to interact with the chatbot:
 
-1. **Enter Your API Key**: You'll need a Google API key for the chatbot to access Google's Generative AI models. Obtain your API key [here](https://makersuite.google.com/app/apikey).
-2. **Upload Your Documents**: The system accepts multiple PDF files at once, analyzing the content to provide comprehensive insights.
-3. **Ask a Question**: After processing the documents, ask any question related to the content of your uploaded documents for a precise answer.
+1. Enter Your API Key: You'll need a Google API key for the chatbot to access Google's Generative AI models. Obtain your API key [here](https://makersuite.google.com/app/apikey).
+2. Upload Your Documents: The system accepts multiple PDF files at once, analyzing the content to provide comprehensive insights.
+3. Ask a Question: After processing the documents, ask any question related to the content of your uploaded documents for a precise answer.
 """)
 
 # API key input
@@ -52,26 +53,6 @@ def get_vector_store(text_chunks, api_key):
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("faiss_index")
 
-def cluster_questions(questions, n_clusters, method='KMeans'):
-    model = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=api_key)
-    embeddings = model.embed([q for q in questions])
-
-    # Scale the embeddings
-    scaler = StandardScaler()
-    embeddings_scaled = scaler.fit_transform(embeddings)
-
-    if method == 'KMeans':
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42)
-        labels = kmeans.fit_predict(embeddings_scaled)
-    elif method == 'DBSCAN':
-        dbscan = DBSCAN(eps=0.5, min_samples=5)
-        labels = dbscan.fit_predict(embeddings_scaled)
-    elif method == 'Agglomerative':
-        agglomerative = AgglomerativeClustering(n_clusters=n_clusters)
-        labels = agglomerative.fit_predict(embeddings_scaled)
-    
-    return labels
-
 def get_conversational_chain(api_key):
     prompt_template = """
     Answer the question as detailed as possible from the provided context, make sure to provide all the details, if the answer is not in
@@ -93,6 +74,22 @@ def user_input(user_question, api_key):
     chain = get_conversational_chain(api_key)  # Pass the api_key here
     response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
     st.write("Reply: ", response["output_text"])
+
+def cluster_questions(questions):
+    model = SentenceTransformer('all-MiniLM-L6-v2')  # Load the Sentence Transformer model
+    embeddings = model.encode(questions)
+    
+    # Apply KMeans clustering
+    n_clusters = st.slider("Select number of clusters for questions", min_value=1, max_value=10, value=3)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    labels = kmeans.fit_predict(embeddings)
+    
+    # Group questions by their cluster labels
+    clustered_questions = {i: [] for i in range(n_clusters)}
+    for idx, label in enumerate(labels):
+        clustered_questions[label].append(questions[idx])
+    
+    return clustered_questions
 
 def main():
     st.header("AI Clone Chatbot 💁")
@@ -119,28 +116,20 @@ def main():
             except Exception as e:
                 st.error(f"An error occurred while processing the PDFs: {e}")
 
-    # Clustering Section
-    st.sidebar.header("Clustering Options")
-    n_clusters = st.slider("Select number of clusters", min_value=1, max_value=10, value=3)
-    clustering_method = st.selectbox("Select Clustering Method", options=["KMeans", "DBSCAN", "Agglomerative"])
-    
-    if st.button("Cluster Questions"):
-        questions = st.text_area("Enter your questions (one per line):").splitlines()
-        if len(questions) < 2:
-            st.warning("Please enter at least two questions to cluster.")
-        else:
-            labels = cluster_questions(questions, n_clusters, method=clustering_method)
-            clustered_questions = {}
-            for idx, label in enumerate(labels):
-                if label not in clustered_questions:
-                    clustered_questions[label] = []
-                clustered_questions[label].append(questions[idx])
+        # Add question clustering section
+        st.subheader("Question Clustering")
+        question_input = st.text_area("Enter your questions (one per line):", key="question_input")
+        if st.button("Cluster Questions", key="cluster_button"):
+            questions = question_input.splitlines()
+            if len(questions) < 2:
+                st.warning("Please enter at least two questions to cluster.")
+            else:
+                clustered_questions = cluster_questions(questions)
+                st.write("Clustered Questions:")
+                for cluster, qs in clustered_questions.items():
+                    st.write(f"*Cluster {cluster}:*")
+                    for q in qs:
+                        st.write(f"- {q}")
 
-            st.subheader("Clustered Questions:")
-            for cluster, qs in clustered_questions.items():
-                st.write(f"*Cluster {cluster}:*")
-                for q in qs:
-                    st.write(f"- {q}")
-
-if __name__ == "__main__":
+if _name_ == "_main_":
     main()
