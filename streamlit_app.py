@@ -2,7 +2,6 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from sklearn.cluster import KMeans, AgglomerativeClustering
@@ -19,14 +18,16 @@ st.set_page_config(page_title="Document Genie", layout="wide")
 st.markdown("""
 ## Next-Gen-PDF-Exploration: Get instant insights from your Documents
 
-This chatbot is built using the Retrieval-Augmented Generation (RAG) framework to process PDF documents by breaking them into manageable chunks, creating a searchable vector store, and generating accurate answers to user queries.
+This chatbot processes PDF documents by breaking them into manageable chunks, creates a searchable vector store, and generates accurate answers to user queries.
 
 ### How It Works
-
 1. *Upload Your Documents:* The system accepts multiple PDF files and creates a searchable vector index.  
 2. *Ask a Question:* Ask any question related to the uploaded documents.  
 3. *Cluster Questions:* Use KMeans, Agglomerative, or Hierarchical clustering to group similar questions.
 """)
+
+# Load the embedding model
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
 def get_pdf_text(pdf_docs):
     text = ""
@@ -42,7 +43,8 @@ def get_text_chunks(text):
     return chunks
 
 def get_vector_store(text_chunks):
-    vector_store = FAISS.from_texts(text_chunks)
+    embeddings = [embedding_model.encode(chunk) for chunk in text_chunks]
+    vector_store = FAISS.from_embeddings(embeddings, text_chunks)
     vector_store.save_local("faiss_index")
 
 def get_conversational_chain():
@@ -59,27 +61,26 @@ def get_conversational_chain():
     return chain
 
 def user_input(user_question):
-    new_db = FAISS.load_local("faiss_index", allow_dangerous_deserialization=True)
+    embeddings = embedding_model  # Ensure consistent embedding use
+    new_db = FAISS.load_local("faiss_index", embeddings)
     docs = new_db.similarity_search(user_question)
     chain = get_conversational_chain()
     response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
     st.write("Reply: ", response["output_text"])
 
 def cluster_questions(questions, method, n_clusters):
-    model = SentenceTransformer('all-MiniLM-L6-v2')  # Load the Sentence Transformer model
-    embeddings = model.encode(questions)
+    embeddings = embedding_model.encode(questions)
 
     if method == "KMeans":
         cluster_model = KMeans(n_clusters=n_clusters, random_state=42)
     elif method == "Agglomerative":
         cluster_model = AgglomerativeClustering(n_clusters=n_clusters)
     elif method == "Hierarchical":
-        # Use linkage matrix for dendrogram visualization
         Z = linkage(embeddings, 'ward')
         plt.figure(figsize=(10, 5))
         dendrogram(Z, labels=questions, leaf_rotation=90)
         st.pyplot(plt)
-        return {}  # No further clustering needed for dendrogram
+        return {}
 
     labels = cluster_model.fit_predict(embeddings)
     clustered_questions = {i: [] for i in range(n_clusters)}
@@ -113,7 +114,6 @@ def main():
             except Exception as e:
                 st.error(f"An error occurred while processing the PDFs: {e}")
 
-        # Question clustering section
         st.subheader("Question Clustering")
         question_input = st.text_area("Enter your questions (one per line):", key="question_input")
 
