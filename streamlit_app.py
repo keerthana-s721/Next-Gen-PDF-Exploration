@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 st.set_page_config(page_title="Document Genie", layout="wide")
 
 st.markdown("""
-## Next-Gen-PDF-Exploration: Get instant insights from your Documents
+##PDF-Exploration: Get instant insights from your Documents
 
 
 """)
