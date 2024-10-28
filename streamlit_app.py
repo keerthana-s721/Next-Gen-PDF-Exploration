@@ -131,5 +131,5 @@ def main():
                     for q in qs:
                         st.write(f"- {q}")
 
-if _name_ == "_main_":
+if __name__ == "_main_":
     main()
