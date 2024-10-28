@@ -35,6 +35,10 @@ Follow these simple steps to interact with the chatbot:
 # API key input
 api_key = st.text_input("Enter your Google API Key:", type="password", key="api_key_input")
 
+# Save API key to session state if provided
+if api_key:
+    st.session_state["api_key"] = api_key
+
 def get_pdf_text(pdf_docs):
     text = ""
     for pdf in pdf_docs:
@@ -94,11 +98,15 @@ def cluster_questions(questions):
 def main():
     st.header("AI Clone Chatbot 💁")
 
+    if "api_key" not in st.session_state:
+        st.warning("Please enter your Google API Key above.")
+        return
+
     user_question = st.text_input("Ask a Question from the PDF Files", key="user_question")
 
-    if user_question and api_key:
+    if user_question:
         try:
-            user_input(user_question, api_key)
+            user_input(user_question, st.session_state["api_key"])
         except Exception as e:
             st.error(f"An error occurred while processing your question: {e}")
 
@@ -106,12 +114,12 @@ def main():
         st.title("Menu:")
         pdf_docs = st.file_uploader("Upload your PDF Files and Click on the Submit & Process Button", accept_multiple_files=True, key="pdf_uploader")
         
-        if st.button("Submit & Process", key="process_button") and api_key:
+        if st.button("Submit & Process", key="process_button"):
             try:
                 with st.spinner("Processing..."):
                     raw_text = get_pdf_text(pdf_docs)
                     text_chunks = get_text_chunks(raw_text)
-                    get_vector_store(text_chunks, api_key)
+                    get_vector_store(text_chunks, st.session_state["api_key"])
                     st.success("Documents processed successfully!")
             except Exception as e:
                 st.error(f"An error occurred while processing the PDFs: {e}")
@@ -131,5 +139,5 @@ def main():
                     for q in qs:
                         st.write(f"- {q}")
 
-if __name__ == "_main_":
+if __name__ == "__main__":
     main()
